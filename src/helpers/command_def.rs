@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use serenity::builder::CreateApplicationCommand;
 use serenity::futures::future::BoxFuture;
 use serenity::model::interactions::application_command::ApplicationCommandInteraction;
 use serenity::model::prelude::*;
 use serenity::prelude::*;
+
+use crate::db::dbclient::DBClient;
 
 // Inspired by:
 // https://github.com/rcos/Telescope/blob/c541baee882087e0920b4a7aff7477c8af2b1622/src/discord_bot/commands/mod.rs

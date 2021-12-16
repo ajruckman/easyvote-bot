@@ -43,6 +43,9 @@ impl EventHandler for BotHandler {
             "Name" => guild.name,
         ]);
 
+        let data = ctx.data.read().await;
+        let data = data.get::<BotData>().unwrap();
+
         let existing_cmds = guild.get_application_commands(&ctx).await.unwrap();
 
         let existing_map = existing_cmds.iter()
@@ -87,10 +90,8 @@ impl EventHandler for BotHandler {
             });
         }
 
-        let data = ctx.data.read().await;
-        let data = data.get::<BotData>().unwrap();
-
-        crate::support::register_polls::register_polls(data.db_client.conn(), &ctx, &guild).await.unwrap();
+        let partial_guild = ctx.http.get_guild(*guild.id.as_u64()).await.unwrap();
+        crate::support::register_polls::register_polls(data.db_client.conn(), &ctx, &partial_guild).await.unwrap();
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {

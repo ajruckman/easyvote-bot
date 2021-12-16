@@ -1,10 +1,10 @@
 use serenity::client::Context;
-use serenity::model::guild::Guild;
+use serenity::model::guild::{Guild, PartialGuild};
 use serenity::model::interactions::application_command::{ApplicationCommand, ApplicationCommandOptionType};
 use serenity::model::prelude::application_command::ApplicationCommandType;
 use sqlx::PgPool;
 
-pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &Guild) -> anyhow::Result<()> {
+pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &PartialGuild) -> anyhow::Result<()> {
     let existing_cmds = guild.get_application_commands(&ctx).await?;
 
     let vote_cmd = existing_cmds.iter().find(|v| v.name == "vote");
