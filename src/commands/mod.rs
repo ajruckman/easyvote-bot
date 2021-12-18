@@ -11,6 +11,13 @@ pub const COMMANDS: &[CommandDef] = &[
         handler: |c, i| Box::pin(async move { poll::poll(c, i).await }),
         re_register: true,
         whitelisted_servers: None,
+    },
+    CommandDef {
+        name: "vote",
+        builder: |cmd| cmd,
+        handler: |c, i| Box::pin(async move { poll::vote(c, i).await }),
+        re_register: false,
+        whitelisted_servers: None,
     }
 ];
 

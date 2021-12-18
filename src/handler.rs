@@ -110,12 +110,12 @@ impl EventHandler for BotHandler {
                 }).await.unwrap();
             } else if interaction.kind == InteractionType::ApplicationCommand {
                 get_logger().info("Interaction ping.", meta! {
-                        "GuildID" => guild.id,
-                        "GuildName" => guild.name,
-                        "InteractionID" => interaction.id,
-                        "CommandID" => interaction.data.id,
-                        "CommandName" => interaction.data.name
-                    });
+                    "GuildID" => guild.id,
+                    "GuildName" => guild.name,
+                    "InteractionID" => interaction.id,
+                    "CommandID" => interaction.data.id,
+                    "CommandName" => interaction.data.name
+                });
 
                 let handler = commands::get_handler(&interaction.data.name);
                 if handler.is_none() { return; }

@@ -16,6 +16,7 @@ pub async fn list_active_polls(
             active: r.active,
             name: r.name,
             question: r.question,
+            ranks: r.ranks as u8,
             options: Vec::new(),
         })
         .fetch(conn);
@@ -48,21 +49,60 @@ pub async fn check_server_has_poll_name(conn: &PgPool, id_server: u64, name: &st
     Ok(r.known.unwrap())
 }
 
+pub async fn get_server_poll(conn: &PgPool, id_server: u64, name: &str) -> anyhow::Result<Option<Poll>> {
+    let r = query!("SELECT * FROM poll WHERE id_server=$1 AND name=$2", id_server.to_string(), name)
+        .fetch_optional(conn)
+        .await?;
+
+    let r = match r {
+        None => return Ok(None),
+        Some(v) => v,
+    };
+
+    let mut options = query!("SELECT * FROM poll_option WHERE id_poll = $1", r.id)
+        .map(|row| {
+            PollOption {
+                id_poll: row.id_poll,
+                id: row.id,
+                option: row.option,
+            }
+        })
+        .fetch(conn);
+
+    let mut opt_result = Vec::new();
+    while let Some(row) = options.try_next().await? {
+        opt_result.push(row);
+    }
+
+    Ok(Some(Poll {
+        id: r.id,
+        time_created: r.time_created,
+        id_server: id_server,
+        id_created_by: r.id_created_by.parse::<u64>().unwrap(),
+        active: r.active,
+        name: r.name,
+        question: r.question,
+        ranks: r.ranks as u8,
+        options: opt_result,
+    }))
+}
+
 pub async fn add_poll(
     conn: &PgPool,
     id_server: u64,
     id_created_by: u64,
     name: &str,
     question: &str,
+    ranks: u8,
     options: &[String],
 ) -> anyhow::Result<Poll> {
     let mut tx = conn.begin().await?;
 
     let r = query!(
-        "INSERT INTO poll (time_created, id_server, id_created_by, active, name, question)
-         VALUES (NOW(), $1, $2, TRUE, $3, $4)
+        "INSERT INTO poll (time_created, id_server, id_created_by, active, name, question, ranks)
+         VALUES (NOW(), $1, $2, TRUE, $3, $4, $5)
          RETURNING id, time_created;",
-        id_server.to_string(), id_created_by.to_string(), name, question)
+        id_server.to_string(), id_created_by.to_string(), name, question, ranks as i32)
         .fetch_one(&mut tx)
         .await?;
 
@@ -94,6 +134,7 @@ pub async fn add_poll(
         active: true,
         name: name.to_owned(),
         question: question.to_owned(),
+        ranks: ranks,
         options: opt_result,
     })
 }

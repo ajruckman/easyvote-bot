@@ -8,6 +8,7 @@ pub struct Poll {
     pub active: bool,
     pub name: String,
     pub question: String,
+    pub ranks: u8,
     pub options: Vec<PollOption>,
 }
 

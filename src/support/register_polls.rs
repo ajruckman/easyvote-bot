@@ -4,6 +4,9 @@ use serenity::model::interactions::application_command::{ApplicationCommand, App
 use serenity::model::prelude::application_command::ApplicationCommandType;
 use sqlx::PgPool;
 
+use crate::support::numbers;
+use crate::support::numbers::num_word;
+
 pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &PartialGuild) -> anyhow::Result<()> {
     let existing_cmds = guild.get_application_commands(&ctx).await?;
 
@@ -32,10 +35,10 @@ pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &PartialGuild) 
                     .description("The poll to vote on")
                     .kind(ApplicationCommandOptionType::SubCommand);
 
-                for i in 0..poll.options.len() {
+                for i in 0..poll.ranks {
                     opt.create_sub_option(|opt_sub| {
-                        opt_sub.name(format!("pick-{}", i + 1))
-                            .description(format!("Your choice for {}", i + 1))
+                        opt_sub.name(format!("choice-{}", i + 1))
+                            .description(format!("Your {} choice", num_word(i + 1)))
                             .required(true)
                             .kind(ApplicationCommandOptionType::String);
 

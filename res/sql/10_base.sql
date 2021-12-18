@@ -5,12 +5,13 @@ DROP TABLE IF EXISTS poll CASCADE;
 CREATE TABLE poll
 (
     id            INT         NOT NULL GENERATED ALWAYS AS IDENTITY,
-    time_created  TIMESTAMPTZ NOT NULL,
+    time_created  timestamptz NOT NULL,
     id_server     VARCHAR(20) NOT NULL,
     id_created_by VARCHAR(20) NOT NULL,
-    active        BOOL        NOT NULL,
+    active        bool        NOT NULL,
     name          VARCHAR(24) NOT NULL,
     question      TEXT        NOT NULL,
+    ranks         INT         NOT NULL,
 
     CONSTRAINT poll_pk PRIMARY KEY (id),
     CONSTRAINT poll_id_server_name_uniq UNIQUE (id_server, name)
@@ -31,7 +32,7 @@ CREATE TABLE ballot
 (
     id_poll      INT         NOT NULL,
     id_user      VARCHAR(20) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
+    time_created timestamptz NOT NULL,
 
     id_option    INT         NOT NULL,
     rank         INT         NOT NULL,
