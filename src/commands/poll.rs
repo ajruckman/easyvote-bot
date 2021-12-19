@@ -15,7 +15,7 @@ use serenity::model::prelude::application_command::ApplicationCommandInteraction
 
 use crate::db;
 use crate::db::dbclient::DBClient;
-use crate::db::schema::Poll;
+use crate::db::schema::{Ballot, Poll};
 use crate::handler::BotData;
 use crate::helpers::{command_opt, command_resp};
 use crate::runtime::get_logger;
@@ -227,6 +227,7 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
     command_resp::reply_deferred_ack(&ctx, &interaction).await?;
 
     let sub = &interaction.data.options[0];
+    let id_user = *interaction.user.id.as_u64();
 
     let data = ctx.data.read().await;
     let data = data.get::<BotData>().unwrap();
@@ -301,8 +302,18 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
         }
     }
 
+    //
+
+    let existed = db::model::get_valid_ballot(data.db_client.conn(), poll.id, id_user).await?;
+    match &existed {
+        None => {}
+        Some(v) => db::model::invalidate_ballot(data.db_client.conn(), v.id).await?,
+    }
+
+    //
+
     let ballot = choices.iter().map(|(i, v)| (v.id, *i)).collect::<Vec<(i32, u8)>>();
-    db::model::add_ballot(data.db_client.conn(), poll.id, *interaction.user.id.as_u64(), &ballot).await?;
+    db::model::add_ballot(data.db_client.conn(), poll.id, id_user, &ballot).await?;
 
     let choice_keys = choices.keys().sorted().collect::<Vec<&u8>>();
 
@@ -317,12 +328,19 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
         e.title("Ballot cast");
         e.field("Poll", format!("{} ({})", poll.name, poll.id), false);
 
+        match &existed {
+            None => {}
+            Some(v) => {
+                e.field("Replaced ballot ID", format!("{} (from {})", v.id, v.time_created), false);
+            }
+        }
+
         let mut opt_string = String::new();
         for key in &choice_keys {
             let v = choices[key];
             opt_string.push_str(&format!("**{}.** {}\n", num_word(**key), v.option));
         }
-        e.field("Options", opt_string, false);
+        e.field("Choices", opt_string, false);
 
         e
     })).await?;

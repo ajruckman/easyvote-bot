@@ -1,6 +1,7 @@
+DROP TABLE IF EXISTS poll CASCADE;
 DROP TABLE IF EXISTS poll_option CASCADE;
 DROP TABLE IF EXISTS ballot CASCADE;
-DROP TABLE IF EXISTS poll CASCADE;
+DROP TABLE IF EXISTS ballot_choice CASCADE;
 
 CREATE TABLE poll
 (
@@ -30,14 +31,24 @@ CREATE TABLE poll_option
 
 CREATE TABLE ballot
 (
+    id           INT         NOT NULL GENERATED ALWAYS AS IDENTITY,
     id_poll      INT         NOT NULL,
     id_user      VARCHAR(20) NOT NULL,
     time_created timestamptz NOT NULL,
+    invalidated  bool        NOT NULL,
 
-    id_option    INT         NOT NULL,
-    rank         INT         NOT NULL,
+    CONSTRAINT ballot_pk PRIMARY KEY (id),
+    CONSTRAINT ballot_valid_uniq UNIQUE (id_poll, id_user, time_created, invalidated),
+    CONSTRAINT ballot_id_poll_fk FOREIGN KEY (id_poll) REFERENCES poll (id)
+);
 
-    CONSTRAINT ballot_pk PRIMARY KEY (id_poll, id_user, id_option),
-    CONSTRAINT ballot_id_poll_fk FOREIGN KEY (id_poll) REFERENCES poll (id),
-    CONSTRAINT ballot_option_fk FOREIGN KEY (id_option) REFERENCES poll_option (id)
+CREATE TABLE ballot_choice
+(
+    id_ballot INT NOT NULL,
+    id_option INT NOT NULL,
+    rank      INT NOT NULL,
+
+    CONSTRAINT ballot_choice_pk PRIMARY KEY (id_ballot, id_option),
+    CONSTRAINT ballot_choice_ballot_fk FOREIGN KEY (id_ballot) REFERENCES ballot (id),
+    CONSTRAINT ballot_choice_option_fk FOREIGN KEY (id_option) REFERENCES poll_option (id)
 );

@@ -1,7 +1,7 @@
 use sqlx::{PgPool, query};
 use tokio_stream::StreamExt;
 
-use crate::db::schema::{Poll, PollOption};
+use crate::db::schema::{Ballot, BallotChoice, Poll, PollOption};
 
 pub async fn list_active_polls(
     conn: &PgPool,
@@ -143,20 +143,76 @@ pub async fn add_ballot(
     conn: &PgPool,
     id_poll: i32,
     id_user: u64,
-    options: &[(i32, u8)],
+    choices: &[(i32, u8)],
 ) -> anyhow::Result<()> {
-    // let tx = conn.begin().await?;
+    let tx = conn.begin().await?;
 
-    for option in options {
+    let ballot = query!(
+        "INSERT INTO ballot (id_poll, id_user, time_created, invalidated)
+         VALUES ($1, $2, NOW(), FALSE)
+         RETURNING id;",
+        id_poll, id_user.to_string())
+        .fetch_one(conn)
+        .await?;
+
+    for choice in choices {
         query!(
-        "INSERT INTO ballot (id_poll, id_user, time_created, id_option, rank)
-         VALUES ($1, $2, NOW(), $3, $4);",
-        id_poll, id_user.to_string(), option.0, option.1 as i32)
+            "INSERT INTO ballot_choice (id_ballot, id_option, rank)
+             VALUES ($1, $2, $3);",
+            ballot.id, choice.0, choice.1 as i32)
             .execute(conn)
             .await?;
     }
 
-    // tx.commit().await?;
+    tx.commit().await?;
+
+    Ok(())
+}
+
+pub async fn get_valid_ballot(
+    conn: &PgPool,
+    id_poll: i32,
+    id_user: u64,
+) -> anyhow::Result<Option<Ballot>> {
+    let tx = conn.begin().await?;
+
+    let ballot = query!("SELECT * FROM ballot WHERE id_poll=$1 AND id_user=$2 AND invalidated=FALSE;", id_poll, id_user.to_string())
+        .fetch_optional(conn)
+        .await?;
+
+    let ballot = match ballot {
+        None => return Ok(None),
+        Some(v) => v,
+    };
+
+    let mut r = Ballot {
+        id: ballot.id,
+        id_poll: ballot.id_poll,
+        id_user: ballot.id_user.parse::<u64>().unwrap(),
+        time_created: ballot.time_created,
+        invalidated: ballot.invalidated,
+        choices: Vec::new(),
+    };
+
+    let mut choices = query!("SELECT * FROM ballot_choice WHERE id_ballot=$1;", ballot.id)
+        .map(|row| BallotChoice {
+            id_ballot: row.id_ballot,
+            id_option: row.id_option,
+            rank: row.rank as u8,
+        })
+        .fetch(conn);
+
+    for choice in choices.try_next().await? {
+        r.choices.push(choice);
+    }
+
+    tx.commit().await?;
+
+    Ok(Some(r))
+}
+
+pub async fn invalidate_ballot(conn: &PgPool, id_ballot: i32) -> anyhow::Result<()> {
+    query!("UPDATE ballot SET invalidated=TRUE WHERE id=$1;", id_ballot).execute(conn).await?;
 
     Ok(())
 }

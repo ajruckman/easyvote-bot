@@ -19,8 +19,16 @@ pub struct PollOption {
 }
 
 pub struct Ballot {
+    pub id: i32,
     pub id_poll: i32,
     pub id_user: u64,
-    pub option: String,
+    pub time_created: DateTime<Utc>,
+    pub invalidated: bool,
+    pub choices: Vec<BallotChoice>,
+}
+
+pub struct BallotChoice {
+    pub id_ballot: i32,
+    pub id_option: i32,
     pub rank: u8,
 }
