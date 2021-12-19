@@ -153,7 +153,15 @@ async fn poll_create(ctx: &Context, interaction: &ApplicationCommandInteraction,
 
     //
 
-    if db::model::check_server_has_poll_name(data.db_client.conn(), *guild_id.as_u64(), &name).await? {
+    let server_has_poll_name = match db::model::check_server_has_poll_name(data.db_client.conn(), *guild_id.as_u64(), &name).await {
+        Ok(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to check for existing poll by name.").await?;
+            return Err(e);
+        }
+    };
+
+    if server_has_poll_name {
         get_logger().info("Attempted to register duplicate server/name combo with /poll create.", meta! {
             "InteractionID" => interaction.id,
             "Name" => name,
@@ -199,7 +207,7 @@ async fn poll_create(ctx: &Context, interaction: &ApplicationCommandInteraction,
         return Ok(());
     }
 
-    let poll = db::model::add_poll(
+    let poll = match db::model::add_poll(
         data.db_client.conn(),
         *guild_id.as_u64(),
         *member.user.id.as_u64(),
@@ -207,7 +215,13 @@ async fn poll_create(ctx: &Context, interaction: &ApplicationCommandInteraction,
         &question,
         ranks,
         &opts,
-    ).await?;
+    ).await {
+        Ok(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to add poll to database.").await?;
+            return Err(e);
+        }
+    };
 
     interaction.create_followup_message(&ctx.http, |r| r.create_embed(|e| {
         e.author(|a| {
@@ -238,7 +252,13 @@ async fn poll_create(ctx: &Context, interaction: &ApplicationCommandInteraction,
 async fn poll_close(ctx: &Context, interaction: &ApplicationCommandInteraction, opt: &ApplicationCommandInteractionDataOption, data: &BotData, guild_id: &GuildId, member: &Member) -> anyhow::Result<()> {
     let name = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_string_opt, "name").await?.unwrap();
 
-    let closed = db::model::close_poll(data.db_client.conn(), *guild_id.as_u64(), *member.user.id.as_u64(), &name).await?;
+    let closed = match db::model::close_poll(data.db_client.conn(), *guild_id.as_u64(), *member.user.id.as_u64(), &name).await {
+        Ok(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to look up and close poll.").await?;
+            return Err(e);
+        }
+    };
 
     if closed {
         command_resp::reply_deferred_result(&ctx, &interaction, format!("Voting closed for poll **'{}'**.", name)).await?;
@@ -260,16 +280,22 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
 
     //
 
-    let poll = match db::model::get_server_poll(data.db_client.conn(), *interaction.guild_id.unwrap().as_u64(), &sub.name).await? {
-        None => {
-            get_logger().info("Failed to find a poll with the name of the /vote sub-option.", meta! {
-                "InteractionID" => interaction.id,
-                "PollName" => sub.name,
-            });
-            command_resp::reply_deferred_result(&ctx, &interaction, format!("Failed to find poll with name **'{}'**.", sub.name)).await?;
-            return Ok(());
+    let poll = match db::model::get_server_poll(data.db_client.conn(), *interaction.guild_id.unwrap().as_u64(), &sub.name).await {
+        Ok(v) => match v {
+            None => {
+                get_logger().info("Failed to find a poll with the name of the /vote sub-option.", meta! {
+                    "InteractionID" => interaction.id,
+                    "PollName" => sub.name,
+                });
+                command_resp::reply_deferred_result(&ctx, &interaction, format!("Failed to find poll with name **'{}'**.", sub.name)).await?;
+                return Ok(());
+            }
+            Some(v) => v,
         }
-        Some(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to find poll by name.").await?;
+            return Err(e);
+        }
     };
 
     if !poll.open {
@@ -304,11 +330,8 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
             }
         };
 
-        let mut found = false;
         for opt in &poll.options {
             if &opt.option == v {
-                found = true;
-
                 if chosen.contains(&opt.option) {
                     get_logger().info("User chose same option in multiple choice positions.", meta! {
                         "InteractionID" => interaction.id,
@@ -345,16 +368,34 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
 
     //
 
-    let existed = db::model::get_valid_ballot(data.db_client.conn(), poll.id, id_user).await?;
+    let existed = match db::model::get_valid_ballot(data.db_client.conn(), poll.id, id_user).await {
+        Ok(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to find user's existing ballot for poll.").await?;
+            return Err(e);
+        }
+    };
     match &existed {
         None => {}
-        Some(v) => db::model::invalidate_ballot(data.db_client.conn(), v.id).await?,
+        Some(v) => match db::model::invalidate_ballot(data.db_client.conn(), v.id).await {
+            Ok(()) => {}
+            Err(e) => {
+                command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to invalidate user's existing ballot for poll.").await?;
+                return Err(e);
+            }
+        }
     }
 
     //
 
     let ballot = choices.iter().map(|(i, v)| (v.id, *i)).collect::<Vec<(i32, u8)>>();
-    db::model::add_ballot(data.db_client.conn(), poll.id, id_user, &ballot).await?;
+    match db::model::add_ballot(data.db_client.conn(), poll.id, id_user, &ballot).await {
+        Ok(()) => {}
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to add ballot.").await?;
+            return Err(e);
+        }
+    }
 
     let choice_keys = choices.keys().sorted().collect::<Vec<&u8>>();
 

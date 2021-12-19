@@ -35,7 +35,7 @@ pub struct BotHandler {}
 
 #[async_trait]
 impl EventHandler for BotHandler {
-    async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {}
+    async fn cache_ready(&self, _ctx: Context, _guilds: Vec<GuildId>) {}
 
     async fn guild_create(&self, ctx: Context, guild: Guild, _is_new: bool) {
         get_logger().info("Guild ready.", meta![
@@ -117,14 +117,16 @@ impl EventHandler for BotHandler {
                     "CommandName" => interaction.data.name
                 });
 
-                let handler = commands::get_handler(&interaction.data.name);
-                if handler.is_none() { return; }
+                let handler = match commands::get_handler(&interaction.data.name) {
+                    None => return,
+                    Some(v) => v,
+                };
 
                 let interaction_id = interaction.id;
                 let command_id = interaction.data.id.clone();
                 let command_name = interaction.data.name.clone();
 
-                let r: anyhow::Result<()> = handler.unwrap()(ctx, interaction).await;
+                let r: anyhow::Result<()> = handler(ctx, interaction).await;
                 match r {
                     Ok(()) => {}
                     Err(e) => {
