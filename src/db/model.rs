@@ -226,6 +226,47 @@ pub async fn get_valid_ballot(
     Ok(Some(r))
 }
 
+pub async fn get_valid_ballots(
+    conn: &PgPool,
+    id_poll: i32,
+) -> anyhow::Result<Vec<Ballot>> {
+    let tx = conn.begin().await?;
+
+    let mut ballots = query!("SELECT * FROM ballot WHERE id_poll=$1 AND invalidated=FALSE;", id_poll)
+        .map(|row| {
+            Ballot {
+                id: row.id,
+                id_poll: row.id_poll,
+                id_user: row.id_user.parse::<u64>().unwrap(),
+                time_created: row.time_created,
+                invalidated: row.invalidated,
+                choices: Vec::new(),
+            }
+        })
+        .fetch(conn);
+
+    let mut ballots_r = Vec::new();
+    while let Some(mut row) = ballots.try_next().await? {
+        let mut choices = query!("SELECT * FROM ballot_choice WHERE id_ballot=$1;", row.id)
+            .map(|row| BallotChoice {
+                id_ballot: row.id_ballot,
+                id_option: row.id_option,
+                rank: row.rank as u8,
+            })
+            .fetch(conn);
+
+        for choice in choices.try_next().await? {
+            row.choices.push(choice);
+        }
+
+        ballots_r.push(row);
+    }
+
+    tx.commit().await?;
+
+    Ok(ballots_r)
+}
+
 pub async fn invalidate_ballot(conn: &PgPool, id_ballot: i32) -> anyhow::Result<()> {
     query!("UPDATE ballot SET invalidated=TRUE WHERE id=$1;", id_ballot).execute(conn).await?;
 

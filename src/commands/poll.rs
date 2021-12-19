@@ -12,6 +12,8 @@ use serenity::model::id::{GuildId, UserId};
 use serenity::model::interactions::application_command::{ApplicationCommandInteraction, ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType};
 use serenity::model::Permissions;
 use serenity::model::prelude::application_command::ApplicationCommandInteractionDataOption;
+use tallystick::Quota;
+use tallystick::stv::{DefaultTally, Tally};
 
 use crate::db;
 use crate::db::dbclient::DBClient;
@@ -84,6 +86,18 @@ pub fn poll_builder(cmd: &mut CreateApplicationCommand) -> &mut CreateApplicatio
                 .create_sub_option(|opt| opt
                     .name("name")
                     .description("The name of the poll to close")
+                    .required(true)
+                    .kind(ApplicationCommandOptionType::String))
+        })
+        .create_option(|opt| {
+            opt
+                .name("tally")
+                .description("Compute poll results")
+                .kind(ApplicationCommandOptionType::SubCommand)
+
+                .create_sub_option(|opt| opt
+                    .name("name")
+                    .description("The name of the poll to tally")
                     .required(true)
                     .kind(ApplicationCommandOptionType::String))
         });
@@ -224,14 +238,9 @@ async fn poll_create(ctx: &Context, interaction: &ApplicationCommandInteraction,
     };
 
     interaction.create_followup_message(&ctx.http, |r| r.create_embed(|e| {
-        e.author(|a| {
-            a.name("easyVote");
-            a.icon_url("https://i.imgur.com/fWgQ8b6.png");
-
-            a
-        });
-
         e.title("New poll created");
+        e.thumbnail("https://i.imgur.com/fWgQ8b6.png");
+
         e.field("Poll", format!("{} ({})", poll.name, poll.id), false);
 
         let mut opt_string = String::new();
@@ -264,6 +273,71 @@ async fn poll_close(ctx: &Context, interaction: &ApplicationCommandInteraction, 
         command_resp::reply_deferred_result(&ctx, &interaction, format!("Voting closed for poll **'{}'**.", name)).await?;
     } else {
         command_resp::reply_deferred_result(&ctx, &interaction, format!("No open poll named **'{}'** was found.", name)).await?;
+    }
+
+    Ok(())
+}
+
+async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, opt: &ApplicationCommandInteractionDataOption, data: &BotData, guild_id: &GuildId, member: &Member) -> anyhow::Result<()> {
+    let name = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_string_opt, "name").await?.unwrap();
+
+    let poll = match db::model::get_server_poll(data.db_client.conn(), *guild_id.as_u64(), &name).await {
+        Ok(v) => match v {
+            None => {
+                command_resp::reply_deferred_result(&ctx, &interaction, format!("Failed to find poll with name **'{}'**.", name)).await?;
+                return Ok(());
+            }
+            Some(v) => v,
+        }
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to look up poll.").await?;
+            return Err(e);
+        }
+    };
+
+    let ballots = match db::model::get_valid_ballots(data.db_client.conn(), poll.id).await {
+        Ok(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to look up valid ballots for poll.").await?;
+            return Err(e);
+        }
+    };
+
+    let mut tally = DefaultTally::new(3, Quota::Droop);
+
+    for ballot in &ballots {
+        let choices = ballot.choices.iter().sorted_by_key(|v| v.rank).map(|v| v.id_option).collect::<Vec<i32>>();
+
+        tally.add(choices);
+    }
+
+    interaction.create_followup_message(&ctx.http, |r| r.create_embed(|e| {
+        e.title("Poll results");
+        e.thumbnail("https://i.imgur.com/fWgQ8b6.png");
+
+        e.field("Poll", format!("{} ({})", poll.name, poll.id), false);
+
+        let mut res_string = String::new();
+
+        for winner in tally.winners().winners {
+            for opt in &poll.options {
+                if winner.candidate == opt.id {
+                    res_string.push_str(&format!("**{}.** {}\n", num_word(winner.rank as u8 + 1), opt.option));
+                }
+            }
+
+        }
+
+        e.field("Winners", res_string, false);
+
+        e
+    })).await?;
+
+
+    let winner_ids = tally.winners();
+
+    for winner_id in &winner_ids.winners {
+
     }
 
     Ok(())
@@ -400,14 +474,9 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
     let choice_keys = choices.keys().sorted().collect::<Vec<&u8>>();
 
     interaction.create_followup_message(&ctx.http, |r| r.create_embed(|e| {
-        e.author(|a| {
-            a.name("easyVote");
-            a.icon_url("https://i.imgur.com/fWgQ8b6.png");
-
-            a
-        });
-
         e.title("Ballot cast");
+        e.thumbnail("https://i.imgur.com/fWgQ8b6.png");
+
         e.field("Poll", format!("{} ({})", poll.name, poll.id), false);
 
         match &existed {
@@ -433,9 +502,6 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
 pub async fn poll(ctx: Context, interaction: ApplicationCommandInteraction) -> anyhow::Result<()> {
     command_resp::reply_deferred_ack(&ctx, &interaction).await?;
 
-    let data = ctx.data.read().await;
-    let data = data.get::<BotData>().unwrap();
-
     let guild_id = interaction.guild_id.as_ref().unwrap();
     let member = interaction.member.as_ref().unwrap();
 
@@ -446,9 +512,13 @@ pub async fn poll(ctx: Context, interaction: ApplicationCommandInteraction) -> a
     println!("{:?}", interaction);
     println!("{:?}", sub);
 
+    let data = ctx.data.read().await;
+    let data = data.get::<BotData>().unwrap();
+
     match sub.name.as_str() {
         "create" => poll_create(&ctx, &interaction, sub, data, guild_id, member).await?,
         "close" => poll_close(&ctx, &interaction, sub, data, guild_id, member).await?,
+        "tally" => poll_tally(&ctx, &interaction, sub, data, guild_id, member).await?,
         _ => {}
     }
 

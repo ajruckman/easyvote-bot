@@ -39,7 +39,7 @@ pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &PartialGuild) 
                     opt.create_sub_option(|opt_sub| {
                         opt_sub.name(format!("choice-{}", i + 1))
                             .description(format!("Your {} choice", num_word(i + 1)))
-                            .required(true)
+                            .required(i == 0)
                             .kind(ApplicationCommandOptionType::String);
 
                         for poll_opt in &poll.options {
