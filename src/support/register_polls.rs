@@ -19,7 +19,7 @@ pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &PartialGuild) 
         }
     }
 
-    let polls = crate::db::model::list_active_polls(conn, *guild.id.as_u64()).await?;
+    let polls = crate::db::model::list_open_polls(conn, *guild.id.as_u64()).await?;
 
     // match vote_cmd {
     //     None => {

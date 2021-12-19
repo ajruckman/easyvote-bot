@@ -3,17 +3,17 @@ use tokio_stream::StreamExt;
 
 use crate::db::schema::{Ballot, BallotChoice, Poll, PollOption};
 
-pub async fn list_active_polls(
+pub async fn list_open_polls(
     conn: &PgPool,
     id_server: u64,
 ) -> anyhow::Result<Vec<Poll>> {
-    let mut stream = query!("SELECT * FROM poll WHERE id_server=$1", id_server.to_string())
+    let mut stream = query!("SELECT * FROM poll WHERE id_server=$1 AND open=TRUE;", id_server.to_string())
         .map(|r| Poll {
             id: r.id,
             time_created: r.time_created,
             id_server: r.id_server.parse::<u64>().unwrap(),
             id_created_by: r.id_created_by.parse::<u64>().unwrap(),
-            active: r.active,
+            open: r.open,
             name: r.name,
             question: r.question,
             ranks: r.ranks as u8,
@@ -79,7 +79,7 @@ pub async fn get_server_poll(conn: &PgPool, id_server: u64, name: &str) -> anyho
         time_created: r.time_created,
         id_server: id_server,
         id_created_by: r.id_created_by.parse::<u64>().unwrap(),
-        active: r.active,
+        open: r.open,
         name: r.name,
         question: r.question,
         ranks: r.ranks as u8,
@@ -99,7 +99,7 @@ pub async fn add_poll(
     let mut tx = conn.begin().await?;
 
     let r = query!(
-        "INSERT INTO poll (time_created, id_server, id_created_by, active, name, question, ranks)
+        "INSERT INTO poll (time_created, id_server, id_created_by, open, name, question, ranks)
          VALUES (NOW(), $1, $2, TRUE, $3, $4, $5)
          RETURNING id, time_created;",
         id_server.to_string(), id_created_by.to_string(), name, question, ranks as i32)
@@ -131,12 +131,27 @@ pub async fn add_poll(
         time_created: r.time_created,
         id_server: id_server,
         id_created_by: id_created_by,
-        active: true,
+        open: true,
         name: name.to_owned(),
         question: question.to_owned(),
         ranks: ranks,
         options: opt_result,
     })
+}
+
+pub async fn close_poll(
+    conn: &PgPool,
+    id_server: u64,
+    id_created_by: u64,
+    name: &str,
+) -> anyhow::Result<bool> {
+    let r = query!(
+        "UPDATE poll SET open=FALSE WHERE id_server=$1 AND id_created_by=$2 AND name=$3 AND open=TRUE;",
+        id_server.to_string(), id_created_by.to_string(), name)
+        .execute(conn)
+        .await?;
+
+    Ok(r.rows_affected() > 0)
 }
 
 pub async fn add_ballot(

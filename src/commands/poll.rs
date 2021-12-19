@@ -74,6 +74,18 @@ pub fn poll_builder(cmd: &mut CreateApplicationCommand) -> &mut CreateApplicatio
             }
 
             opt
+        })
+        .create_option(|opt| {
+            opt
+                .name("close")
+                .description("Close a poll")
+                .kind(ApplicationCommandOptionType::SubCommand)
+
+                .create_sub_option(|opt| opt
+                    .name("name")
+                    .description("The name of the poll to close")
+                    .required(true)
+                    .kind(ApplicationCommandOptionType::String))
         });
 
     cmd
@@ -223,6 +235,20 @@ async fn poll_create(ctx: &Context, interaction: &ApplicationCommandInteraction,
     Ok(())
 }
 
+async fn poll_close(ctx: &Context, interaction: &ApplicationCommandInteraction, opt: &ApplicationCommandInteractionDataOption, data: &BotData, guild_id: &GuildId, member: &Member) -> anyhow::Result<()> {
+    let name = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_string_opt, "name").await?.unwrap();
+
+    let closed = db::model::close_poll(data.db_client.conn(), *guild_id.as_u64(), *member.user.id.as_u64(), &name).await?;
+
+    if closed {
+        command_resp::reply_deferred_result(&ctx, &interaction, format!("Voting closed for poll **'{}'**.", name)).await?;
+    } else {
+        command_resp::reply_deferred_result(&ctx, &interaction, format!("No open poll named **'{}'** was found.", name)).await?;
+    }
+
+    Ok(())
+}
+
 pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> anyhow::Result<()> {
     command_resp::reply_deferred_ack(&ctx, &interaction).await?;
 
@@ -232,7 +258,7 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
     let data = ctx.data.read().await;
     let data = data.get::<BotData>().unwrap();
 
-    // let poll_name = sub.name;
+    //
 
     let poll = match db::model::get_server_poll(data.db_client.conn(), *interaction.guild_id.unwrap().as_u64(), &sub.name).await? {
         None => {
@@ -240,11 +266,23 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
                 "InteractionID" => interaction.id,
                 "PollName" => sub.name,
             });
-            command_resp::reply_deferred_result(&ctx, &interaction, format!("Failed to find poll with name '{}'.", sub.name)).await?;
+            command_resp::reply_deferred_result(&ctx, &interaction, format!("Failed to find poll with name **'{}'**.", sub.name)).await?;
             return Ok(());
         }
         Some(v) => v,
     };
+
+    if !poll.open {
+        get_logger().info("User attempted to vote on closed poll.", meta! {
+            "InteractionID" => interaction.id,
+            "PollID" => poll.id,
+            "PollName" => poll.name,
+        });
+        command_resp::reply_deferred_result(&ctx, &interaction, format!("Voting is closed for poll **'{}'**.", sub.name)).await?;
+        return Ok(());
+    }
+
+    //
 
     let mut chosen = HashSet::new();
     let mut choices = HashMap::new();
@@ -258,7 +296,8 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
             _ => {
                 get_logger().info("Vote option did not have a string value.", meta! {
                     "InteractionID" => interaction.id,
-                    "PollName" => sub.name,
+                    "PollID" => poll.id,
+                    "PollName" => poll.name,
                 });
                 command_resp::reply_deferred_result(&ctx, &interaction, format!("Invalid value; expected string, got '{:?}'.", choice.kind)).await?;
                 return Ok(());
@@ -273,7 +312,8 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
                 if chosen.contains(&opt.option) {
                     get_logger().info("User chose same option in multiple choice positions.", meta! {
                         "InteractionID" => interaction.id,
-                        "PollName" => sub.name,
+                        "PollID" => poll.id,
+                        "PollName" => poll.name,
                         "ChoiceN" => n,
                     });
                     command_resp::reply_deferred_result(&ctx, &interaction, format!(
@@ -287,7 +327,8 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
                     // Should never happen
                     get_logger().info("Duplicate choice-n argument passed to /vote sub-option.", meta! {
                         "InteractionID" => interaction.id,
-                        "PollName" => sub.name,
+                        "PollID" => poll.id,
+                        "PollName" => poll.name,
                         "ChoiceN" => n,
                     });
                     command_resp::reply_deferred_result(&ctx, &interaction, format!("Duplicate choice number '{}'.", n)).await?;
@@ -366,6 +407,7 @@ pub async fn poll(ctx: Context, interaction: ApplicationCommandInteraction) -> a
 
     match sub.name.as_str() {
         "create" => poll_create(&ctx, &interaction, sub, data, guild_id, member).await?,
+        "close" => poll_close(&ctx, &interaction, sub, data, guild_id, member).await?,
         _ => {}
     }
 

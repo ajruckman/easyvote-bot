@@ -5,7 +5,7 @@ pub struct Poll {
     pub time_created: DateTime<Utc>,
     pub id_server: u64,
     pub id_created_by: u64,
-    pub active: bool,
+    pub open: bool,
     pub name: String,
     pub question: String,
     pub ranks: u8,
