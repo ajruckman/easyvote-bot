@@ -21,7 +21,7 @@ async fn main() {
 
     let appl: u64 = env::var("EASYVOTE_APPL").expect("expected EASYVOTE_APPL").parse().expect("application ID is invalid");
     let token = env::var("EASYVOTE_TOKEN").expect("expected EASYVOTE_TOKEN");
-    let db_url = env::var("DATABASE_URL").expect("expected DATABASE_URL");
+    let db_url = env::var("EASYVOTE_DATABASE_URL").expect("expected EASYVOTE_DATABASE_URL");
 
     let mut logger = Logger::default();
     logger.register(LogEventConsolePrinter::default());
