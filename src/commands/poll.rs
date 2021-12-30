@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use evlog::meta;
 use itertools::Itertools;
@@ -8,16 +7,12 @@ use regex::Regex;
 use serenity::builder::CreateApplicationCommand;
 use serenity::client::Context;
 use serenity::model::guild::Member;
-use serenity::model::id::{GuildId, UserId};
+use serenity::model::id::GuildId;
 use serenity::model::interactions::application_command::{ApplicationCommandInteraction, ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType};
 use serenity::model::Permissions;
 use serenity::model::prelude::application_command::ApplicationCommandInteractionDataOption;
-use tallystick::Quota;
-use tallystick::stv::{DefaultTally, Tally};
 
-use crate::db;
-use crate::db::dbclient::DBClient;
-use crate::db::schema::{Ballot, Poll};
+use crate::{db, stv};
 use crate::handler::BotData;
 use crate::helpers::{command_opt, command_resp};
 use crate::runtime::get_logger;
@@ -100,6 +95,11 @@ pub fn poll_builder(cmd: &mut CreateApplicationCommand) -> &mut CreateApplicatio
                     .description("The name of the poll to tally")
                     .required(true)
                     .kind(ApplicationCommandOptionType::String))
+                // .create_sub_option(|opt| opt
+                //     .name("max-seats")
+                //     .description("The maximum possible winners to tally, if sufficient votes exist (default: 100, min: 1, max: 100)")
+                //     .required(true)
+                //     .kind(ApplicationCommandOptionType::Integer))
         });
 
     cmd
@@ -281,6 +281,18 @@ async fn poll_close(ctx: &Context, interaction: &ApplicationCommandInteraction, 
 async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, opt: &ApplicationCommandInteractionDataOption, data: &BotData, guild_id: &GuildId, member: &Member) -> anyhow::Result<()> {
     let name = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_string_opt, "name").await?.unwrap();
 
+    // let seats = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_integer_opt, "seats").await?.unwrap();
+    // if seats < 1 {
+    //     command_resp::reply_deferred_result(&ctx, &interaction, "At least 1 seat is required.").await?;
+    //     return Ok(());
+    // }
+    // if seats > 15 {
+    //     command_resp::reply_deferred_result(&ctx, &interaction, "No more than 15 seats are allowed.").await?;
+    //     return Ok(());
+    // }
+    // let seats = seats as u64;
+    let seats = 150;
+
     let poll = match db::model::get_server_poll(data.db_client.conn(), *guild_id.as_u64(), &name).await {
         Ok(v) => match v {
             None => {
@@ -303,13 +315,54 @@ async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, 
         }
     };
 
-    let mut tally = DefaultTally::new(3, Quota::Droop);
+    //
 
-    for ballot in &ballots {
-        let choices = ballot.choices.iter().sorted_by_key(|v| v.rank).map(|v| v.id_option).collect::<Vec<i32>>();
-
-        tally.add(choices);
+    let mut stv_candidates = Vec::new();
+    for opt in &poll.options {
+        stv_candidates.push(opt.option.clone());
     }
+
+    let mut stv_votes = Vec::new();
+    for ballot in &ballots {
+        let mut stv_vote = Vec::new();
+
+        for choice in ballot.choices.iter().sorted_by_key(|v| v.rank).map(|v| v.id_option) {
+            for opt in &poll.options {
+                if choice == opt.id {
+                    stv_vote.push(opt.option.clone());
+                    break;
+                }
+            }
+        }
+
+        stv_votes.push(stv_vote);
+    }
+
+    let stv_election = stv::Election::new(stv_candidates, stv_votes, seats);
+
+    let stv_results = match stv_election.results() {
+        Ok(v) => v,
+        Err(e) => {
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to tally ballots.").await?;
+            return Err(e);
+        }
+    };
+
+    let mut winners = Vec::new();
+    for (opt, votes) in stv_results.elected() {
+        winners.push((opt.as_str().to_owned(), *votes));
+    }
+    winners.sort_by_key(|(opt, votes)| -(*votes as i64));
+
+    //
+
+    // let mut tally = DefaultTally::new(20, Quota::Droop);
+    //
+    // for ballot in &ballots {
+    //     let choices = ballot.choices.iter().sorted_by_key(|v| v.rank).map(|v| v.id_option).collect::<Vec<i32>>();
+    //
+    //     tally.add(choices);
+    // }
 
     interaction.create_followup_message(&ctx.http, |r| r.create_embed(|e| {
         e.title("Poll results");
@@ -319,26 +372,28 @@ async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, 
 
         let mut res_string = String::new();
 
-        for winner in tally.winners().winners {
-            for opt in &poll.options {
-                if winner.candidate == opt.id {
-                    res_string.push_str(&format!("**{}.** {}\n", num_word(winner.rank as u8 + 1), opt.option));
-                }
-            }
+        // for winner in tally.winners().winners {
+        //     for opt in &poll.options {
+        //         if winner.candidate == opt.id {
+        //             res_string.push_str(&format!("**{}.** **{}** (rank {})\n", num_word(winner.rank as u8 + 1), opt.option, winner.rank));
+        //         }
+        //     }
+        // }
 
+        let mut last = u64::MAX;
+        let mut curr = 0;
+        for (opt, votes) in winners {
+            if votes < last {
+                curr += 1;
+                last = votes;
+            }
+            res_string.push_str(&format!("**{}**. **{}** (cumulative votes: {})\n", curr, opt, votes));
         }
 
         e.field("Winners", res_string, false);
 
         e
     })).await?;
-
-
-    let winner_ids = tally.winners();
-
-    for winner_id in &winner_ids.winners {
-
-    }
 
     Ok(())
 }
@@ -348,6 +403,7 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
 
     let sub = &interaction.data.options[0];
     let id_user = *interaction.user.id.as_u64();
+    // let id_user = Utc::now().time().num_seconds_from_midnight() as u64;
 
     let data = ctx.data.read().await;
     let data = data.get::<BotData>().unwrap();

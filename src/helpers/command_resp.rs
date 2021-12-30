@@ -1,6 +1,5 @@
 use serenity::builder::CreateInteractionResponseData;
 use serenity::client::Context;
-use serenity::model::guild::Guild;
 use serenity::model::id::MessageId;
 use serenity::model::interactions::InteractionResponseType;
 use serenity::model::interactions::application_command::ApplicationCommandInteraction;

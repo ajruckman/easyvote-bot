@@ -255,7 +255,7 @@ pub async fn get_valid_ballots(
             })
             .fetch(conn);
 
-        for choice in choices.try_next().await? {
+        while let Some(choice) = choices.try_next().await? {
             row.choices.push(choice);
         }
 

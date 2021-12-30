@@ -1,10 +1,8 @@
 use serenity::client::Context;
-use serenity::model::guild::{Guild, PartialGuild};
-use serenity::model::interactions::application_command::{ApplicationCommand, ApplicationCommandOptionType};
-use serenity::model::prelude::application_command::ApplicationCommandType;
+use serenity::model::guild::PartialGuild;
+use serenity::model::interactions::application_command::ApplicationCommandOptionType;
 use sqlx::PgPool;
 
-use crate::support::numbers;
 use crate::support::numbers::num_word;
 
 pub async fn register_polls(conn: &PgPool, ctx: &Context, guild: &PartialGuild) -> anyhow::Result<()> {

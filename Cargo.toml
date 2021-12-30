@@ -19,6 +19,7 @@ tokio = { version = "1.11", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
 itertools = "0.10"
 tallystick = "0.4"
+rand = "0.8"
 
 [dependencies.serenity]
 git = "https://github.com/serenity-rs/serenity"

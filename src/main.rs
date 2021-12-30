@@ -13,6 +13,7 @@ mod db;
 mod commands;
 mod helpers;
 mod support;
+mod stv;
 
 #[tokio::main]
 async fn main() {
