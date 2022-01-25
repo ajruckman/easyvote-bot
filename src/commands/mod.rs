@@ -9,7 +9,7 @@ pub const COMMANDS: &[CommandDef] = &[
         name: poll::POLL,
         builder: poll::poll_builder,
         handler: |c, i| Box::pin(async move { poll::poll(c, i).await }),
-        re_register: false,
+        re_register: true,
         whitelisted_servers: None,
     },
     CommandDef {

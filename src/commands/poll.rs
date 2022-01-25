@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use evlog::meta;
 use itertools::Itertools;
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use regex::Regex;
 use serenity::builder::CreateApplicationCommand;
 use serenity::client::Context;
@@ -95,6 +95,12 @@ pub fn poll_builder(cmd: &mut CreateApplicationCommand) -> &mut CreateApplicatio
                     .description("The name of the poll to tally")
                     .required(true)
                     .kind(ApplicationCommandOptionType::String))
+
+                .create_sub_option(|opt| opt
+                    .name("seats")
+                    .description("The number of seats to calculate results for")
+                    .required(true)
+                    .kind(ApplicationCommandOptionType::Integer))
         });
 
     cmd
@@ -273,9 +279,15 @@ async fn poll_close(ctx: &Context, interaction: &ApplicationCommandInteraction, 
     Ok(())
 }
 
-async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, opt: &ApplicationCommandInteractionDataOption, data: &BotData, guild_id: &GuildId, member: &Member) -> anyhow::Result<()> {
+async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, opt: &ApplicationCommandInteractionDataOption, data: &BotData, guild_id: &GuildId) -> anyhow::Result<()> {
     let name = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_string_opt, "name").await?.unwrap();
-    let seats = 150;
+    let seats = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_integer_opt, "seats").await?.unwrap();
+
+    if seats < 1 {
+        command_resp::reply_deferred_result(&ctx, &interaction, "Value for 'seats' must be at least 1.").await?;
+        return Ok(());
+    }
+    let seats = seats as u64;
 
     let poll = match db::model::get_server_poll(data.db_client.conn(), *guild_id.as_u64(), &name).await {
         Ok(v) => match v {
@@ -336,7 +348,7 @@ async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, 
     for (opt, votes) in stv_results.elected() {
         winners.push((opt.as_str().to_owned(), *votes));
     }
-    winners.sort_by_key(|(opt, votes)| -(*votes as i64));
+    winners.sort_by_key(|(_, votes)| -(*votes as i64));
 
     //
 
@@ -403,6 +415,23 @@ pub async fn vote(ctx: Context, interaction: ApplicationCommandInteraction) -> a
             "PollName" => poll.name,
         });
         command_resp::reply_deferred_result(&ctx, &interaction, format!("Voting is closed for poll **'{}'**.", sub.name)).await?;
+        return Ok(());
+    }
+
+    //
+
+    if !ALLOWED_VOTER_IDS.contains(&id_user) {
+        get_logger().info("Ineligible user attempted to vote.", meta! {
+            "InteractionID" => interaction.id,
+            "PollID" => poll.id,
+            "PollName" => poll.name,
+            "UserID" => id_user,
+        });
+        command_resp::reply_deferred_result(&ctx, &interaction, format!(
+            "You are not eligible to vote in elections. \
+            Members may only vote if they sent at least 250 messages between \
+            October 31, 2021 at 11:30 AM EST, and January 23, 2022 at 11:30 AM EST."
+        )).await?;
         return Ok(());
     }
 
@@ -542,7 +571,7 @@ pub async fn poll(ctx: Context, interaction: ApplicationCommandInteraction) -> a
     match sub.name.as_str() {
         "create" => poll_create(&ctx, &interaction, sub, data, guild_id, member).await?,
         "close" => poll_close(&ctx, &interaction, sub, data, guild_id, member).await?,
-        "tally" => poll_tally(&ctx, &interaction, sub, data, guild_id, member).await?,
+        "tally" => poll_tally(&ctx, &interaction, sub, data, guild_id).await?,
         _ => {}
     }
 
@@ -550,3 +579,80 @@ pub async fn poll(ctx: Context, interaction: ApplicationCommandInteraction) -> a
 
     Ok(())
 }
+
+static ALLOWED_VOTER_IDS: Lazy<HashSet<u64>> = Lazy::new(|| {
+    let mut allowed = HashSet::new();
+
+    allowed.insert(350021640223981569);
+    allowed.insert(468969078879551489);
+    allowed.insert(565813691891712004);
+    allowed.insert(241280648436908032);
+    allowed.insert(822597873321508924);
+    allowed.insert(705993505784201227);
+    allowed.insert(191609253683920896);
+    allowed.insert(313414684613279748);
+    allowed.insert(95882096597274624);
+    allowed.insert(712171518347444225);
+    allowed.insert(384172870344900609);
+    allowed.insert(403179220445954052);
+    allowed.insert(478676609914765322);
+    allowed.insert(925092899719352382);
+    allowed.insert(693660661300985908);
+    allowed.insert(276910354091474944);
+    allowed.insert(633770126407237643);
+    allowed.insert(166316524188073984);
+    allowed.insert(292953664492929025);
+    allowed.insert(312052072105115648);
+    allowed.insert(881847125397372938);
+    allowed.insert(428973268771536907);
+    allowed.insert(496465935574499328);
+    allowed.insert(127246301518757888);
+    allowed.insert(280620013046464513);
+    allowed.insert(889947779336638464);
+    allowed.insert(655541486422589443);
+    allowed.insert(181679004669968384);
+    allowed.insert(234030425490718720);
+    allowed.insert(293325579380326400);
+    allowed.insert(155149108183695360);
+    allowed.insert(226470678331785217);
+    allowed.insert(846513264518234122);
+    allowed.insert(304435494211682305);
+    allowed.insert(831177153819181116);
+    allowed.insert(838115755434311690);
+    allowed.insert(837041495785209976);
+    allowed.insert(526062632688680970);
+    allowed.insert(881226255138173029);
+    allowed.insert(272133320614084609);
+    allowed.insert(808344274109857832);
+    allowed.insert(215636790172712961);
+    allowed.insert(711375037265084497);
+    allowed.insert(689024279601479696);
+    allowed.insert(537353774205894676);
+    allowed.insert(305325955512008704);
+    allowed.insert(880812757799305307);
+    allowed.insert(442732803474456576);
+    allowed.insert(464468304896065536);
+    allowed.insert(479371794093047808);
+    allowed.insert(614109280508968980);
+    allowed.insert(917103954251354112);
+    allowed.insert(926200130212876328);
+    allowed.insert(589928914399526918);
+    allowed.insert(186125711537340417);
+    allowed.insert(618196763588952065);
+    allowed.insert(482457186375827457);
+    allowed.insert(502561547458183189);
+    allowed.insert(377877206526984203);
+    allowed.insert(520904266555195393);
+    allowed.insert(129794058917904385);
+    allowed.insert(643228492598607872);
+    allowed.insert(541318786259746816);
+    allowed.insert(910227052723052587);
+    allowed.insert(561318847785730062);
+    allowed.insert(397546088908849166);
+    allowed.insert(700796664276844612);
+    allowed.insert(918002895570489394);
+    allowed.insert(182232330088218624);
+    allowed.insert(383680177932075010);
+
+    allowed
+});
