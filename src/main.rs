@@ -4,6 +4,8 @@ use std::env;
 use evlog::{LogEventConsolePrinter, Logger};
 use itertools::Itertools;
 use serenity::Client;
+use tallystick::Quota;
+use tallystick::stv::Tally;
 use crate::db::dbclient::DBClient;
 use crate::handler::{BotData, BotHandler};
 use crate::runtime::{get_logger, set_logger};
@@ -18,7 +20,7 @@ mod stv;
 
 async fn tally(db: &DBClient) {
     // let name = command_opt::find_required(&ctx, &interaction, &opt.options, command_opt::find_string_opt, "name").await?.unwrap();
-    let seats = 5;
+    let seats = 3;
 
     let poll = match db::model::get_server_poll(db.conn(), 303056270150074368, "admin-2022").await {
         Ok(v) => match v {
@@ -64,33 +66,40 @@ async fn tally(db: &DBClient) {
         stv_votes.push(stv_vote);
     }
 
-    let stv_election = stv::Election::new(stv_candidates, stv_votes, seats);
+    let mut stv_election = Tally::<String, usize>::new(seats, Quota::Droop);
+    // let stv_election = stv::Election::new(stv_candidates, stv_votes, seats);
 
-    let stv_results = match stv_election.results() {
-        Ok(v) => v,
-        Err(e) => {
-            return;
-        }
-    };
+    for vote in &stv_votes {
+        stv_election.add_ref(vote);
+    }
+
+    let stv_results = stv_election.winners();
+    // let stv_results = match stv_election.results() {
+    //     Ok(v) => v,
+    //     Err(e) => {
+    //         return;
+    //     }
+    // };
 
     let mut winners = Vec::new();
-    for (opt, votes) in stv_results.elected() {
-        winners.push((opt.as_str().to_owned(), *votes));
+    for vote in stv_results.winners {
+        winners.push((vote.candidate, vote.rank));
+        // winners.push((opt.as_str().to_owned(), *votes));
     }
-    winners.sort_by_key(|(_, votes)| -(*votes as i64));
+    winners.sort_by_key(|(_, votes)| *votes as i64);
 
     //
 
     let mut res_string = String::new();
 
-    let mut last = u64::MAX;
+    let mut last = usize::MAX;
     let mut curr = 0;
-    for (opt, votes) in winners {
-        if votes < last {
+    for (opt, rank) in winners {
+        if rank < last {
             curr += 1;
-            last = votes;
+            last = rank;
         }
-        res_string.push_str(&format!("**{}**. **{}** (cumulative votes: {})\n", curr, opt, votes));
+        res_string.push_str(&format!("**{}**. **{}**\n", rank, opt));
     }
 
     println!("{}", res_string);
@@ -111,23 +120,23 @@ async fn main() {
     let db_client = DBClient::new(&db_url).await
         .expect("failed to connect to database");
 
-    // tally(&db_client).await;
+    tally(&db_client).await;
+
+    return;
+
+    // let data = handler::BotData::new(db_client).await;
     //
-    // return;
-
-    let data = handler::BotData::new(db_client).await;
-
-    let mut client = Client::builder(&token)
-        .event_handler(BotHandler {})
-        .application_id(appl)
-        .await
-        .unwrap_or_else(|e| {
-            get_logger().error_with_err("Client initialization error.", &e, None);
-            panic!("{}", e)
-        });
-    client.data.write().await.insert::<BotData>(data);
-
-    if let Err(e) = client.start_shards(2).await {
-        get_logger().error_with_err("Client error.", e, None);
-    }
+    // let mut client = Client::builder(&token)
+    //     .event_handler(BotHandler {})
+    //     .application_id(appl)
+    //     .await
+    //     .unwrap_or_else(|e| {
+    //         get_logger().error_with_err("Client initialization error.", &e, None);
+    //         panic!("{}", e)
+    //     });
+    // client.data.write().await.insert::<BotData>(data);
+    //
+    // if let Err(e) = client.start_shards(2).await {
+    //     get_logger().error_with_err("Client error.", e, None);
+    // }
 }
