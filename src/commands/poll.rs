@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use evlog::meta;
 use itertools::Itertools;
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serenity::builder::CreateApplicationCommand;
 use serenity::client::Context;
