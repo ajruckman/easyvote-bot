@@ -12,10 +12,11 @@ use serenity::model::interactions::application_command::{ApplicationCommandInter
 use serenity::model::Permissions;
 use serenity::model::prelude::application_command::ApplicationCommandInteractionDataOption;
 
-use crate::{db, stv};
+use crate::db;
 use crate::handler::BotData;
 use crate::helpers::{command_opt, command_resp};
 use crate::runtime::get_logger;
+use crate::stv::Election;
 use crate::support::numbers::num_word;
 
 pub const POLL: &str = "poll";
@@ -287,7 +288,7 @@ async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, 
         command_resp::reply_deferred_result(&ctx, &interaction, "Value for 'seats' must be at least 1.").await?;
         return Ok(());
     }
-    let seats = seats as u64;
+    let seats = seats as u8;
 
     let poll = match db::model::get_server_poll(data.db_client.conn(), *guild_id.as_u64(), &name).await {
         Ok(v) => match v {
@@ -334,21 +335,14 @@ async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, 
         stv_votes.push(stv_vote);
     }
 
-    let stv_election = stv::Election::new(stv_candidates, stv_votes, seats);
-
-    let stv_results = match stv_election.results() {
+    let stv_election = Election::new(stv_votes, seats);
+    let winners = match stv_election.winners() {
         Ok(v) => v,
         Err(e) => {
-            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to tally ballots.").await?;
+            command_resp::reply_deferred_result(&ctx, &interaction, "Error occurred upon attempt to calculate election winners.").await?;
             return Err(e);
         }
     };
-
-    let mut winners = Vec::new();
-    for (opt, votes) in stv_results.elected() {
-        winners.push((opt.as_str().to_owned(), *votes));
-    }
-    winners.sort_by_key(|(_, votes)| -(*votes as i64));
 
     //
 
@@ -357,17 +351,19 @@ async fn poll_tally(ctx: &Context, interaction: &ApplicationCommandInteraction, 
         e.thumbnail("https://i.imgur.com/fWgQ8b6.png");
 
         e.field("Poll", format!("{} ({})", poll.name, poll.id), false);
+        e.field("Total final votes", ballots.len(), false);
 
         let mut res_string = String::new();
 
-        let mut last = u64::MAX;
+        let mut last = u16::MAX;
         let mut curr = 0;
+
         for (opt, votes) in winners {
             if votes < last {
                 curr += 1;
                 last = votes;
             }
-            res_string.push_str(&format!("**{}**. **{}** (cumulative votes: {})\n", curr, opt, votes));
+            res_string.push_str(&format!("**{}**. **{}** (rank: {})\n", curr, opt, votes));
         }
 
         e.field("Winners", res_string, false);
